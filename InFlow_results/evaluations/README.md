@@ -81,7 +81,7 @@ python3 evalOnImageNet.py --image_count 100 --imagenet <path-to-imagenet-validat
 python3 evalOnImageNet.py --image_count 100 --imagenet <path-to-imagenet-validation> --function InFlow --model VIT_base_16
 ```
 
-<h3>Evaluation of InFlow contributios (Table 2)</h3>
+<h3>Evaluation of InFlow Contributions (Table 2)</h3>
 
 
 
