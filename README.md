@@ -1,7 +1,7 @@
 # InFlow - Explaining ViTs Using Information Flow
 The official implementation of the InFlow ViT attribution method from the AISTATS 2025 paper: Explaining ViTs Using Information Flow
 
- * Official Paper - [TBR]()
+ * Official Paper - [AISTATS 2025 Proceedings](https://proceedings.mlr.press/v258/walker25a.html)
 
 ## How to Use MDA
 See `example.ipynb` for a full example of the application of the MDA source code compared with SOTA ViT attribution methods.
