@@ -264,17 +264,14 @@ class Block(nn.Module):
     def forward(self, x, register_hook=False):
         self.save_input(x)
 
-        # x = x + self.attn(self.norm1(x), register_hook=register_hook)
         x = x + self.drop_path(self.attn(self.norm1(x), register_hook=register_hook))
         self.save_input_plus_attn(x)
 
-        # y = self.mlp(self.norm2(x))
         y = self.drop_path(self.mlp(self.norm2(x)))
         self.save_mlp_val(y)
         x = x + y
 
         return x
-
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer
@@ -351,7 +348,7 @@ class VisionTransformer(nn.Module):
 
         self.init_weights(weight_init)
 
-        self.block_classifications = None
+        self.block_classification_probs = None
 
     def init_weights(self, mode=''):
         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')
@@ -390,12 +387,11 @@ class VisionTransformer(nn.Module):
         if self.num_tokens == 2:
             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
-    def save_block_classifications(self,block_classifications):
-        self.block_classifications = block_classifications
+    def save_block_classification_probs(self,block_classification_probs):
+        self.block_classification_probs = block_classification_probs
 
-    def get_block_classifications(self):
-        return self.block_classifications
-
+    def get_block_classification_probs(self):
+        return self.block_classification_probs
 
     def forward_features(self, x, register_hook=False):
         x = self.patch_embed(x)
@@ -405,28 +401,25 @@ class VisionTransformer(nn.Module):
         else:
             x = torch.cat((cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
         x = self.pos_drop(x + self.pos_embed)
-        # x = self.blocks(x)
 
-        block_classifications = []
+        block_classification_probs = []
 
         for blk in self.blocks:
             x = blk(x, register_hook=register_hook)
 
-            # get the classification from this layer and save to block_classifications
+            # get the classification from this layer over all tokens and save to block_classification_probs
             y = self.norm(x)
-            y = y[:, 0]
+            y = y.mean(dim = 1)
             y = self.head(y)
-            block_classifications.append(y)
+            block_classification_probs.append(y)
 
-        self.save_block_classifications(block_classifications)
+        self.save_block_classification_probs(block_classification_probs)
 
         x = self.norm(x)
         if self.dist_token is None:
             return self.pre_logits(x[:, 0])
         else:
             return x[:, 0], x[:, 1]
-
-
 
     def forward(self, x, register_hook=False):
         x = self.forward_features(x, register_hook=register_hook)
@@ -612,7 +605,6 @@ def _create_vision_transformer(variant: str, pretrained: bool = False, **kwargs)
         **kwargs,
     )
 
-
 @register_model
 def vit_tiny_patch16_224(pretrained: bool = False, **kwargs) -> VisionTransformer:
     """ ViT-Tiny (Vit-Ti/16)
@@ -620,7 +612,6 @@ def vit_tiny_patch16_224(pretrained: bool = False, **kwargs) -> VisionTransforme
     model_args = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3)
     model = _create_vision_transformer('vit_tiny_patch16_224', pretrained=pretrained, **dict(model_args, **kwargs))
     return model
-
 
 @register_model
 def vit_small_patch32_224(pretrained: bool = False, **kwargs) -> VisionTransformer:
@@ -630,7 +621,6 @@ def vit_small_patch32_224(pretrained: bool = False, **kwargs) -> VisionTransform
     model = _create_vision_transformer('vit_small_patch32_224', pretrained=pretrained, **dict(model_args, **kwargs))
     return model
 
-
 @register_model
 def vit_small_patch16_224(pretrained: bool = False, **kwargs) -> VisionTransformer:
     """ ViT-Small (ViT-S/16)
@@ -638,7 +628,6 @@ def vit_small_patch16_224(pretrained: bool = False, **kwargs) -> VisionTransform
     model_args = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6)
     model = _create_vision_transformer('vit_small_patch16_224', pretrained=pretrained, **dict(model_args, **kwargs))
     return model
-
 
 @register_model
 def vit_base_patch32_224(pretrained: bool = False, **kwargs) -> VisionTransformer:
@@ -649,7 +638,6 @@ def vit_base_patch32_224(pretrained: bool = False, **kwargs) -> VisionTransforme
     model = _create_vision_transformer('vit_base_patch32_224', pretrained=pretrained, **dict(model_args, **kwargs))
     return model
 
-
 @register_model
 def vit_base_patch16_224(pretrained: bool = False, **kwargs) -> VisionTransformer:
     """ ViT-Base (ViT-B/16) from original paper (https://arxiv.org/abs/2010.11929).
@@ -658,7 +646,6 @@ def vit_base_patch16_224(pretrained: bool = False, **kwargs) -> VisionTransforme
     model_args = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12)
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **dict(model_args, **kwargs))
     return model
-
 
 @register_model
 def vit_base_patch8_224(pretrained: bool = False, **kwargs) -> VisionTransformer:
@@ -669,7 +656,6 @@ def vit_base_patch8_224(pretrained: bool = False, **kwargs) -> VisionTransformer
     model = _create_vision_transformer('vit_base_patch8_224', pretrained=pretrained, **dict(model_args, **kwargs))
     return model
 
-
 @register_model
 def vit_large_patch32_224(pretrained: bool = False, **kwargs) -> VisionTransformer:
     """ ViT-Large model (ViT-L/32) from original paper (https://arxiv.org/abs/2010.11929). No pretrained weights.
@@ -677,7 +663,6 @@ def vit_large_patch32_224(pretrained: bool = False, **kwargs) -> VisionTransform
     model_args = dict(patch_size=32, embed_dim=1024, depth=24, num_heads=16)
     model = _create_vision_transformer('vit_large_patch32_224', pretrained=pretrained, **dict(model_args, **kwargs))
     return model
-
 
 @register_model
 def vit_large_patch16_224(pretrained: bool = False, **kwargs) -> VisionTransformer:

@@ -193,7 +193,16 @@ class Baselines:
 
         return rollout.reshape(-1, patches_per_side, patches_per_side), test, torch.stack(all_layer_attentions)
 
-    def generate_InFlow(self, input, target_class, withgrad = True, device = "cuda:0", ablate = 0):
+    def generate_InFlow(self, input, target_class, withgrad = True, device = "cuda:0", ablate = 0, stop_layer = 12, target_token = 0):
+        '''
+        The user may set two additional paramaters to control the explanation:
+        stop layer: the layer up to which InFlow will be performed 
+        target_token: The InFlow operation produces a matrix of [tokens, tokens].
+                      The standard operation is to take the first row (the [CLS] token).
+                      The user may select another token if they see fit, but this is
+                      **NOT RECOMMENED** as it is unlikely to provide a strong 
+                      explanation, since only the [CLS] token captures global image information.
+        '''
         blocks = self.model.blocks
         _, num_heads, _, _ = self.model.blocks[-1].attn.get_attention_map().shape
 
@@ -207,10 +216,9 @@ class Baselines:
         score.backward(retain_graph=True)
         input.requires_grad = False
 
-        prob = self.model.get_block_classifications()
-        k = 0
+        prob = self.model.get_block_classification_probs()
 
-        for blk in blocks:
+        for i, blk in enumerate(blocks[0 : stop_layer + 1]):
             attn_heads = blk.attn.get_attention_map() 
             grad = blk.attn.get_attn_gradients()
             input = blk.get_input().squeeze()
@@ -218,23 +226,21 @@ class Baselines:
             resid_1 = blk.get_input_plus_attn().squeeze()
             mlp = blk.get_mlp_val().squeeze()
             
-            if withgrad == True:
-                grad_temp = grad.reshape(-1, grad.shape[-2], grad.shape[-1])
-                attn_temp = attn_heads.reshape(-1, attn_heads.shape[-2], attn_heads.shape[-1])
-                Ih = torch.mean(torch.matmul(attn_temp.transpose(-1,-2), grad_temp).abs(), dim=(-1,-2))
-                Ih = Ih / torch.sum(Ih)
-                max_heads = torch.max(attn_heads * Ih.reshape(1, num_heads, 1, 1), dim = 1)[0].detach()
+            # Use the head importance to pick the most important head
+            grad_temp = grad.reshape(-1, grad.shape[-2], grad.shape[-1])
+            attn_temp = attn_heads.reshape(-1, attn_heads.shape[-2], attn_heads.shape[-1])
+            Ih = torch.mean(torch.matmul(attn_temp.transpose(-1,-2), grad_temp).abs(), dim=(-1,-2))
+            Ih = Ih / torch.sum(Ih)
+            max_heads = torch.max(attn_heads * Ih.reshape(1, num_heads, 1, 1), dim = 1)[0].detach()
 
-                F = prob[k]
-                gradient = torch.autograd.grad(torch.unbind(F[:, target_class]), attn_heads, retain_graph=True)[0][0]
-                k += 1
+            # Multiply the attention of each layer by its bottom up gradient.
+            # "Bottom up" gradient for layer 4 is found by classifying the output of layer 4 
+            # and then taking the gradient to the input.
+            # This is in contrast to taking the gradient from the last layer (output) to layer 4.
+            if withgrad == True:
+                block_classifcation_probs = prob[i]
+                gradient = torch.autograd.grad(torch.unbind(block_classifcation_probs[:, target_class]), attn_heads, retain_graph=True)[0][0]
                 max_heads = (gradient.mean(dim = 0, keepdim=True) * max_heads).clamp(0)
-            else:
-                grad = grad.reshape(-1, grad.shape[-2], grad.shape[-1])
-                attn_temp = attn_heads.reshape(-1, attn_heads.shape[-2], attn_heads.shape[-1])
-                Ih = torch.mean(torch.matmul(attn_temp.transpose(-1,-2), grad).abs(), dim=(-1,-2))
-                Ih = Ih / torch.sum(Ih)
-                max_heads = torch.max(attn_heads * Ih.reshape(1, num_heads, 1, 1), dim = 1)[0].detach()
 
             all_layer_attentions.append(max_heads)
 
@@ -253,7 +259,9 @@ class Baselines:
             all_layer_biases_resid_2.append(one_norm)
 
         InFlow, _ = compute_InFlow(all_layer_attentions, all_layer_biases_resid_1, all_layer_biases_resid_2, ablate)
-        InFlow = InFlow[:, 0, 1:]
+
+        # select some target patch and all of the image patches
+        InFlow = InFlow[:, target_token, 1:]
 
         patches_per_side = int(np.sqrt(InFlow.shape[-1]))
 
